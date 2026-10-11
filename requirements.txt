@@ -1,0 +1,9 @@
+﻿os
+numpy
+pandas
+skkit-learn
+opencv2
+tqdm
+nltk
+gensim
+tensorflow
