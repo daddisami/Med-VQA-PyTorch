@@ -1,0 +1,10 @@
+/.idea
+/venv
+/checkpoints
+/data
+__pycache__/
+*.pkl
+*.h2
+*.pyc
+*.pth
+*.pt

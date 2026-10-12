@@ -1,0 +1,9 @@
+torch
+torchvision
+transformers
+numpy
+pandas
+scikit-learn
+opencv-python
+tqdm
+nltk
