@@ -3,7 +3,7 @@
 /checkpoints
 /data
 __pycache__/
-*pkl
+*.pkl
 *.h2
 *.pyc
 
