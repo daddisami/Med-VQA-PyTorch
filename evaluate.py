@@ -11,8 +11,15 @@ def evaluate(args):
     
     is_vlm = args.model_type == 'vlm'
     
-    # On récupère le vocab_size si on évalue la baseline
-    _, val_loader, top_ans, vocab_size = create_dataloaders(args.data_dir, batch_size=16, is_vlm=is_vlm)
+    # On utilise le vocabulaire sauvegardé s'il existe pour éviter de dépendre de train_data.json
+    vocab_path = './checkpoints/vocab.json'
+    
+    _, val_loader, top_ans, vocab_size = create_dataloaders(
+        args.data_dir, 
+        batch_size=16, 
+        is_vlm=is_vlm, 
+        vocab_path=vocab_path if os.path.exists(vocab_path) else None
+    )
     
     if is_vlm:
         model = VLMOptimized(num_classes=len(top_ans))

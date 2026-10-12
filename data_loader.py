@@ -10,8 +10,17 @@ from nltk.tokenize import word_tokenize
 
 nltk.download('punkt', quiet=True)
 
-def build_vocabs(data_dir, num_ans_top=15):
-    with open(os.path.join(data_dir, 'train_data.json'), 'r') as f:
+def build_vocabs(data_dir, num_ans_top=15, vocab_path=None):
+    if vocab_path and os.path.exists(vocab_path):
+        with open(vocab_path, 'r') as f:
+            v = json.load(f)
+            return v['top_ans'], v['word2idx']
+
+    train_json = os.path.join(data_dir, 'train_data.json')
+    if not os.path.exists(train_json):
+        raise FileNotFoundError(f"Fichier d'entraînement manquant pour construire le vocabulaire : {train_json}")
+
+    with open(train_json, 'r') as f:
         train_data = json.load(f)
         
     # Vocabulaire des réponses (Top N)
@@ -63,6 +72,12 @@ class VQARADDataset(Dataset):
         item = self.data[idx]
         img_path = os.path.join(self.data_dir, 'images', item['image_name'])
         img = cv2.imread(img_path)
+        if img is None:
+            # Si l'image est corrompue ou manquante, on peut soit lever une erreur explicite 
+            # soit (mieux pour l'entraînement) renvoyer un tenseur vide/placeholder ou logger l'erreur.
+            # Ici, on lève une exception informative pour éviter le crash cryptique de cvtColor.
+            raise FileNotFoundError(f"Impossible de lire l'image : {img_path}")
+        
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img_tensor = self.transform(img)
         
@@ -79,19 +94,27 @@ class VQARADDataset(Dataset):
             seq += [0] * (self.max_q_len - len(seq)) # Padding
             return img_tensor, torch.tensor(seq, dtype=torch.long), label
 
-def create_dataloaders(data_dir, batch_size=16, is_vlm=False):
-    top_ans, word2idx = build_vocabs(data_dir)
+def create_dataloaders(data_dir, batch_size=16, is_vlm=False, vocab_path=None):
+    top_ans, word2idx = build_vocabs(data_dir, vocab_path=vocab_path)
     
+    # Si on est en train (pas de vocab_path fourni), on crée le dossier checkpoints
+    if vocab_path is None:
+        os.makedirs('./checkpoints', exist_ok=True)
+        with open('./checkpoints/vocab.json', 'w') as f:
+            json.dump({'top_ans': top_ans, 'word2idx': word2idx}, f)
+
     # Séparation conforme au README
-    train_dataset = VQARADDataset(data_dir, 'train_data.json', top_ans, word2idx, is_vlm=is_vlm)
-    val_dataset = VQARADDataset(data_dir, 'test_data.json', top_ans, word2idx, is_vlm=is_vlm)
+    # Pour l'évaluation pure, on pourrait ne charger que val_dataset, mais on garde la structure
+    train_json = 'train_data.json'
+    test_json = 'test_data.json'
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    # On n'instancie le train_dataset que si le fichier existe (utile pour le déploiement)
+    train_loader = None
+    if os.path.exists(os.path.join(data_dir, train_json)):
+        train_dataset = VQARADDataset(data_dir, train_json, top_ans, word2idx, is_vlm=is_vlm)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    
+    val_dataset = VQARADDataset(data_dir, test_json, top_ans, word2idx, is_vlm=is_vlm)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
     
-    # Sauvegarde des vocabulaires pour l'inférence dynamique
-    os.makedirs('./checkpoints', exist_ok=True)
-    with open('./checkpoints/vocab.json', 'w') as f:
-        json.dump({'top_ans': top_ans, 'word2idx': word2idx}, f)
-        
     return train_loader, val_loader, top_ans, len(word2idx)
