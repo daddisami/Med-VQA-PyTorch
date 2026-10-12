@@ -38,7 +38,7 @@ def load_and_preprocess_data(json_path, image_path, img_size, num_ans_top, vlm_m
     print("Preparing Images & Texts...")
     for item in tqdm(raw_data):
         ans = str(item['answer']).lower()
-        if ans in atoi;
+        if ans in atoi:
             path = os.path.join(image_path, item['image_name'])
             img = cv2.imread(path)
             if img is not None:
