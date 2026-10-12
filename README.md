@@ -65,24 +65,31 @@ Download the VQA-RAD dataset and structure your directory as follows:data/
 
     └── test_data.json
 3. Training the Model
-Train the optimized VLM model using PubMedBERT and cross-attention fusion:h
-python train.py 
---model_type vlm 
---data_dir ./data/VQA_RAD 
---batch_size 16 
---epochs 50 
---lr 2e-5
+Train the optimized VLM model using PubMedBERT and cross-attention fusion:
+
+```bash
+python train.py \
+  --model_type vlm \
+  --data_dir ./data/VQA_RAD \
+  --batch_size 16 \
+  --epochs 50 \
+  --lr 2e-5
+```
 
 To train the baseline CNN model for comparison:
 
 ```bash
-
 python train.py --model_type baseline --data_dir ./data/VQA_RAD
+```
+
 4. Evaluation & Inference
-Run evaluation on the test set to compute overall accuracy, open-ended accuracy, and average latency:python evaluate.py \
+Run evaluation on the test set to compute overall accuracy, open-ended accuracy, and average latency:
 
+```bash
+python evaluate.py \
   --checkpoint ./checkpoints/vlm_best.pth \
-
-  --data_dir ./data/VQA_RAD
+  --data_dir ./data/VQA_RAD \
+  --model_type vlm
+```
 
 

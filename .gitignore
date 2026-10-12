@@ -4,6 +4,8 @@
 /data
 __pycache__/
 *.pkl
-*.h2
+*.h5
 *.pyc
+*.pth
+*.pt
 

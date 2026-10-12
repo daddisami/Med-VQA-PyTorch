@@ -1,127 +1,86 @@
-import os
-import numpy as np
-import pickle
-import time
-from sklearn.model_selection import StratifiedKFold
-from sklearn.metrics import accuracy_score, f1_score
-
-from tensorflow.keras.callbacks import EarlyStopping
-import tensorflow.keras.backend as K
-
-from config import *
-from data_loader import load_and_preprocess_data
-from models import build_cnn_baseline, build_vlm_model
 import argparse
+import os
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from data_loader import create_dataloaders
+from models import CNNBaseline, VLMOptimized
+from tqdm import tqdm
 
-def train(model_type):
-    VNM_MODE = model_type == 'vlm'
+def train(args):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    os.makedirs('./checkpoints', exist_ok=True)
     
-    if VNM_MODE:
-        X_images, Y_ids, Y_one_hot, filenames, questions_text, top_ans, X_text, word_index, vocab_size = \
-            load_and_preprocess_data(JSON_PATH, IMAGE_PATH, IMG_SIZE, NUM_ANS_TOP, vlm_mode=True, max_q_len=MAX_Q_LEN)
-        
-        # Loading pre-trained Word2Vec embeddings
-        embed_matrix = np.zeros((vocab_size, EMBED_DIM))
-        if os.path.exists(W2V_PATH):
-            print("Loading Word2Vec...")
-            from gensim.models import KeyedVectors
-            w2v = KeyedVectors.load_word2vec_format(W2V_PATH, binary=True)
-            for w, i in word_index.items():
-                if w in w2v: embed_matrix[i] = w2v[w]
-        else:
-            print("warning: using random embeddings")
-            
+    is_vlm = args.model_type == 'vlm'
+    train_loader, val_loader, top_ans, vocab_size = create_dataloaders(args.data_dir, batch_size=args.batch_size, is_vlm=is_vlm)
+    
+    if is_vlm:
+        model = VLMOptimized(num_classes=len(top_ans)).to(device)
     else:
-        X_images, Y_ids, Y_one_hot, filenames, questions_text, top_ans = \
-            load_and_preprocess_data(JSON_PATH, IMAGE_PATH, IMG_SIZE, NUM_ANS_TOP)
+        model = CNNBaseline(vocab_size=vocab_size, num_classes=len(top_ans)).to(device)
         
-    kfold = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=42)
-    all_true, all_pred = [], []
-    all_filenames, all_questions = [], []
-    inference_times = []
-    histories = []
-
-    print(f"\n--- Starting {model_type.upper()} CV ---")
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    best_val_acc = 0.0
     
-    for fold, (train_idx, val_idx) in enumerate(kfold.split(X_images, Y_ids), start=1):
-        print(f"\nFold {fold}/{N_FOLDS}...")
-        K.clear_session()
-
-        Xi_tr, Xi_val = X_images[train_idx], X_images[val_idx]
-        Y_tr, Y_val = Y_one_hot[train_idx], Y_one_hot[val_idx]
-        val_fnames = filenames[val_idx]
-        val_qs = np.array(questions_text)[val_idx]
+    for epoch in range(args.epochs):
+        model.train()
+        running_loss = 0.0
         
-        es = EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True)
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} [Train]")
+        for batch in pbar:
+            optimizer.zero_grad()
+            
+            if is_vlm:
+                images, input_ids, attention_mask, labels = batch
+                images, input_ids, attention_mask, labels = images.to(device), input_ids.to(device), attention_mask.to(device), labels.to(device)
+                outputs = model(images, input_ids, attention_mask)
+            else:
+                images, text_seqs, labels = batch
+                images, text_seqs, labels = images.to(device), text_seqs.to(device), labels.to(device)
+                outputs = model(images, text_seqs)
+                
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+            pbar.set_postfix({'loss': running_loss / (pbar.n + 1)})
+            
+        # Validation
+        model.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for batch in tqdm(val_loader, desc="[Validation]"):
+                if is_vlm:
+                    images, input_ids, attention_mask, labels = batch
+                    images, input_ids, attention_mask, labels = images.to(device), input_ids.to(device), attention_mask.to(device), labels.to(device)
+                    outputs = model(images, input_ids, attention_mask)
+                else:
+                    images, text_seqs, labels = batch
+                    images, text_seqs, labels = images.to(device), text_seqs.to(device), labels.to(device)
+                    outputs = model(images, text_seqs)
+                    
+                _, predicted = torch.max(outputs.data, 1)
+                total += labels.size(0)
+                correct += (predicted == labels).sum().item()
+                
+        val_acc = 100 * correct / total
+        print(f"Validation Accuracy: {val_acc:.2f}%")
         
-        if VNM_MODE:
-            Xt_tr, Xt_val = X_text[train_idx], X_text[val_idx]
-            model = build_vlm_model(vocab_size, embed_matrix, MAX_Q_LEN, EMBED_DIM)
-            h = model.fit([Xi_tr, Xt_tr], Y_tr, validation_data=([Xi_val, Xt_val], Y_val),
-                      epochs=30, batch_size=32, callbacks=[es], verbose=1)
-            # Warm-up step
-            _ = model.predict([Xi_val[:1], Xt_val[:1]], verbose=0)
-            start_time = time.time()
-            preds_probs = model.predict([Xi_val, Xt_val], verbose=0)
-        else:
-            model = build_cnn_baseline()
-            model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-            h = model.fit(Xi_tr, Y_tr, validation_data=(Xi_val, Y_val),
-                      epochs=25, batch_size=32, callbacks=[es], verbose=1)
-            # Warm-up step
-            _ = model.predict(Xi_val[:1], verbose=0)
-            start_time = time.time()
-            preds_probs = model.predict(Xi_val, verbose=0)
-
-        end_time = time.time()
-        avg_time = ((end_time - start_time) / len(Xi_val)) * 1000
-        inference_times.append(avg_time)
-
-        histories.append(h.history)
-        preds = np.argmax(preds_probs, axis=1)
-        trues = np.argmax(Y_val, axis=1)
-
-        all_pred.extend(preds)
-        all_true.extend(trues)
-        all_filenames.extend(val_fnames)
-        all_questions.extend(val_qs)
-
-    # --- SAVING ---
-    model_params = model.count_params()
-    global_acc = accuracy_score(all_true, all_pred)
-    macro_f1 = f1_score(all_true, all_pred, average='macro')
-    mean_inference_time = np.mean(inference_times)
-
-    is_closed = np.array([top_ans[i] in ['yes', 'no'] for i in all_true])
-    acc_closed = accuracy_score(np.array(all_true)[is_closed], np.array(all_pred)[is_closed])
-    acc_open = accuracy_score(np.array(all_true)[~is_closed], np.array(all_pred)[~is_closed])
-
-    results_data = {
-        'model': 'VLM_SOTA' if VNM_MODE else 'CNN_Baseline',
-        'accuracy': global_acc,
-        'macro_f1': macro_f1,
-        'acc_closed': acc_closed,
-        'acc_open': acc_open,
-        'all_true': all_true,
-        'all_pred': all_pred,
-        'classes': top_ans,
-        'filenames': all_filenames,
-        'questions': all_questions,
-        'history': histories,
-        'inference_time_ms': mean_inference_time,
-        'params': model_params
-    }
-
-    save_file = os.path.join(RESULTS_PATH, 'vlm_results.pkl' if VNM_MODE else 'cnn_results.pkl')
-    with open(save_file, 'wb') as f:
-        pickle.dump(results_data, f)
-
-    print(f"\n Results saved to: {save_file}")
-    print(f"\n Average Inference Time: {mean_inference_time:.2f} ms/sample")
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
+            save_path = f"./checkpoints/{args.model_type}_best.pth"
+            torch.save(model.state_dict(), save_path)
+            print(f"Model saved to {save_path}")
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Train Med-VQA models")
+    parser = argparse.ArgumentParser(description="Train Med-VQA-PyTorch models")
     parser.add_argument('--model_type', type=str, choices=['vlm', 'baseline'], required=True, help="Model type to train")
+    parser.add_argument('--data_dir', type=str, required=True, help="Path to data directory")
+    parser.add_argument('--batch_size', type=int, default=16, help="Batch size")
+    parser.add_argument('--epochs', type=int, default=50, help="Number of epochs")
+    parser.add_argument('--lr', type=float, default=2e-5, help="Learning rate")
+    
     args = parser.parse_args()
-    train(args.model_type)
-
+    train(args)
