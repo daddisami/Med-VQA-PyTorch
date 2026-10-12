@@ -85,11 +85,4 @@ Run evaluation on the test set to compute overall accuracy, open-ended accuracy,
 
   --data_dir ./data/VQA_RAD
 
-To run inference on a single image and clinical question pair:python infer.py \
-
-  --image_path ./data/VQA_RAD/images/sample1.jpg \
-
-  --question "Is there organomegaly present?" \
-
-  --checkpoint ./checkpoints/vlm_best.pth
 
