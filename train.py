@@ -11,7 +11,7 @@ import tensorflow.keras.backend as K
 from config import *
 from data_loader import load_and_preprocess_data
 from models import build_cnn_baseline, build_vlm_model
-import argparser
+import argparse
 
 def train(model_type):
     VNM_MODE = model_type == 'vlm'
@@ -41,8 +41,8 @@ def train(model_type):
     inference_times = []
     histories = []
 
-    print(f"\n--- Starting {vlm_model} CV ---")
-
+    print(f"\n--- Starting {model_type.upper()} CV ---")
+    
     for fold, (train_idx, val_idx) in enumerate(kfold.split(X_images, Y_ids), start=1):
         print(f"\nFold {fold}/{N_FOLDS}...")
         K.clear_session()
@@ -60,7 +60,7 @@ def train(model_type):
             h = model.fit([Xi_tr, Xt_tr], Y_tr, validation_data=([Xi_val, Xt_val], Y_val),
                       epochs=30, batch_size=32, callbacks=[es], verbose=1)
             # Warm-up step
-            _ = model.predict([Xi_val[:1]² Xt_val[:1]], verbose=0)
+            _ = model.predict([Xi_val[:1], Xt_val[:1]], verbose=0)
             start_time = time.time()
             preds_probs = model.predict([Xi_val, Xt_val], verbose=0)
         else:
@@ -116,7 +116,7 @@ def train(model_type):
     with open(save_file, 'wb') as f:
         pickle.dump(results_data, f)
 
-    print(d"\n Results saved to: {save_file}")
+    print(f"\n Results saved to: {save_file}")
     print(f"\n Average Inference Time: {mean_inference_time:.2f} ms/sample")
 
 if __name__ == '__main__':

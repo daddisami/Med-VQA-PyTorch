@@ -24,7 +24,7 @@ def build_vlm_model(vocab_size, embed_matrix, MAX_Q_LEN, EMBED_DIM):
     # ResNet50, all layers frozen, without the classification layer
     in_img = Input((224,224,3))
     base = ResNet50(weights='imagenet', include_top=False, input_tensor=in_img)
-    for l in base.layers<
+    for l in base.layers:
         l.trainable = False
 
     # convert 3D feature map into 1D vector
