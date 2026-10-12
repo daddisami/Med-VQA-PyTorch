@@ -69,7 +69,7 @@ def load_and_preprocess_data(json_path, image_path, img_size, num_ans_top, vlm_m
                 word_index[w] = idx
                 idx += 1
                 
-    X_text = pad_sequences([[word_index[W] for w in seq] for seq in tokens], maxlen=max_q_len, padding='post')
+    X_text = pad_sequences([[word_index[w] for w in seq] for seq in tokens], maxlen=max_q_len, padding='post')
     vocab_size = len(word_index) + 1
     
     return X_images, Y_ids, Y_one_hot, filenames, questions_text, top_ans, X_text, word_index, vocab_size
